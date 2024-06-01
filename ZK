@@ -1,0 +1,29 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "@openzeppelin/contracts/access/Ownable.sol";
+
+contract ZKRollup is Ownable {
+    struct Batch {
+        bytes32 stateRoot;
+        bytes32 zkProof;
+    }
+
+    Batch[] public batches;
+    bytes32 public currentStateRoot;
+
+    event BatchSubmitted(uint256 indexed batchIndex, bytes32 stateRoot, bytes32 zkProof);
+
+    function submitBatch(bytes32 newStateRoot, bytes32 zkProof) external onlyOwner {
+        batches.push(Batch(newStateRoot, zkProof));
+        currentStateRoot = newStateRoot;
+
+        emit BatchSubmitted(batches.length - 1, newStateRoot, zkProof);
+    }
+
+    function getBatch(uint256 batchIndex) external view returns (bytes32 stateRoot, bytes32 zkProof) {
+        require(batchIndex < batches.length, "Batch index out of range");
+        Batch memory batch = batches[batchIndex];
+        return (batch.stateRoot, batch.zkProof);
+    }
+}
