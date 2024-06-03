@@ -1,0 +1,114 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+contract MultiSigWallet {
+    address[] public owners;
+    uint256 public required;
+
+    struct Transaction {
+        address to;
+        uint256 value;
+        bytes data;
+        bool executed;
+    }
+
+    Transaction[] public transactions;
+    mapping(uint256 => mapping(address => bool)) public confirmations;
+
+    event Deposit(address indexed sender, uint256 value);
+    event TransactionSubmitted(uint256 indexed transactionId, address indexed to, uint256 value, bytes data);
+    event TransactionConfirmed(uint256 indexed transactionId, address indexed owner);
+    event TransactionExecuted(uint256 indexed transactionId);
+
+    modifier onlyOwner() {
+        require(isOwner(msg.sender), "Not an owner");
+        _;
+    }
+
+    modifier txExists(uint256 _txIndex) {
+        require(_txIndex < transactions.length, "Transaction does not exist");
+        _;
+    }
+
+    modifier notExecuted(uint256 _txIndex) {
+        require(!transactions[_txIndex].executed, "Transaction already executed");
+        _;
+    }
+
+    modifier notConfirmed(uint256 _txIndex) {
+        require(!confirmations[_txIndex][msg.sender], "Transaction already confirmed");
+        _;
+    }
+
+    constructor(address[] memory _owners, uint256 _required) {
+        require(_owners.length > 0, "Owners required");
+        require(_required > 0 && _required <= _owners.length, "Invalid required number of owners");
+
+        for (uint256 i = 0; i < _owners.length; i++) {
+            require(_owners[i] != address(0), "Invalid owner");
+            owners.push(_owners[i]);
+        }
+
+        required = _required;
+    }
+
+    receive() external payable {
+        emit Deposit(msg.sender, msg.value);
+    }
+
+    function submitTransaction(address _to, uint256 _value, bytes memory _data) public onlyOwner {
+        uint256 txIndex = transactions.length;
+
+        transactions.push(Transaction({
+            to: _to,
+            value: _value,
+            data: _data,
+            executed: false
+        }));
+
+        emit TransactionSubmitted(txIndex, _to, _value, _data);
+    }
+
+    function confirmTransaction(uint256 _txIndex) public onlyOwner txExists(_txIndex) notExecuted(_txIndex) notConfirmed(_txIndex) {
+        confirmations[_txIndex][msg.sender] = true;
+        emit TransactionConfirmed(_txIndex, msg.sender);
+    }
+
+    function executeTransaction(uint256 _txIndex) public onlyOwner txExists(_txIndex) notExecuted(_txIndex) {
+        Transaction storage transaction = transactions[_txIndex];
+
+        uint256 confirmCount = 0;
+        for (uint256 i = 0; i < owners.length; i++) {
+            if (confirmations[_txIndex][owners[i]]) {
+                confirmCount += 1;
+            }
+        }
+
+        require(confirmCount >= required, "Cannot execute transaction");
+
+        transaction.executed = true;
+
+        (bool success, ) = transaction.to.call{value: transaction.value}(transaction.data);
+        require(success, "Transaction failed");
+
+        emit TransactionExecuted(_txIndex);
+    }
+
+    function isOwner(address _address) public view returns (bool) {
+        for (uint256 i = 0; i < owners.length; i++) {
+            if (owners[i] == _address) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function getTransactionCount() public view returns (uint256) {
+        return transactions.length;
+    }
+
+    function getTransaction(uint256 _txIndex) public view returns (address to, uint256 value, bytes memory data, bool executed) {
+        Transaction storage transaction = transactions[_txIndex];
+        return (transaction.to, transaction.value, transaction.data, transaction.executed);
+    }
+}
