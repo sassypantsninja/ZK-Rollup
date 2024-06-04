@@ -1,0 +1,93 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+contract ZKMultiSigWallet {
+    uint256 public threshold;
+    address[] public participants;
+    mapping(address => bool) public isParticipant;
+    mapping(bytes32 => bool) public executedTransactions;
+    
+    event TransactionProposed(bytes32 txHash);
+    event TransactionSigned(bytes32 txHash, address signer);
+    event TransactionExecuted(bytes32 txHash);
+    
+    struct Transaction {
+        bytes32 txHash;
+        address destination;
+        uint256 value;
+        bytes data;
+        uint256 signatureCount;
+        mapping(address => bool) signatures;
+    }
+    
+    mapping(bytes32 => Transaction) public transactions;
+    
+    constructor(address[] memory _participants, uint256 _threshold) {
+        require(_participants.length >= _threshold, "Invalid threshold");
+        threshold = _threshold;
+        
+        for (uint i = 0; i < _participants.length; i++) {
+            address participant = _participants[i];
+            require(participant != address(0), "Invalid participant address");
+            participants.push(participant);
+            isParticipant[participant] = true;
+        }
+    }
+    
+    function proposeTransaction(address destination, uint256 value, bytes memory data, bytes memory zkProof) public {
+        require(isParticipant[msg.sender], "Not authorized");
+        
+        // Verify the ZK Proof (implementation depends on the ZK framework used)
+        require(verifyZKProof(zkProof), "Invalid ZK Proof");
+        
+        bytes32 txHash = keccak256(abi.encode(destination, value, data));
+        require(!executedTransactions[txHash], "Transaction already executed");
+        
+        Transaction storage txn = transactions[txHash];
+        txn.txHash = txHash;
+        txn.destination = destination;
+        txn.value = value;
+        txn.data = data;
+        txn.signatureCount = 0;
+        
+        emit TransactionProposed(txHash);
+    }
+    
+    function signTransaction(bytes32 txHash, bytes memory zkProof) public {
+        require(isParticipant[msg.sender], "Not authorized");
+        Transaction storage txn = transactions[txHash];
+        require(txn.txHash != bytes32(0), "Transaction does not exist");
+        require(!txn.signatures[msg.sender], "Already signed");
+        
+        // Verify the ZK Proof (implementation depends on the ZK framework used)
+        require(verifyZKProof(zkProof), "Invalid ZK Proof");
+        
+        txn.signatures[msg.sender] = true;
+        txn.signatureCount++;
+        
+        emit TransactionSigned(txHash, msg.sender);
+        
+        if (txn.signatureCount >= threshold) {
+            executeTransaction(txHash);
+        }
+    }
+    
+    function executeTransaction(bytes32 txHash) internal {
+        Transaction storage txn = transactions[txHash];
+        require(txn.signatureCount >= threshold, "Not enough signatures");
+        require(!executedTransactions[txHash], "Transaction already executed");
+        
+        executedTransactions[txHash] = true;
+        
+        (bool success,) = txn.destination.call{value: txn.value}(txn.data);
+        require(success, "Transaction failed");
+        
+        emit TransactionExecuted(txHash);
+    }
+    
+    function verifyZKProof(bytes memory zkProof) internal pure returns (bool) {
+        // Implement ZK Proof verification logic here
+        // This is a placeholder function
+        return true;
+    }
+}
